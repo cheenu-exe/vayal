@@ -1,26 +1,47 @@
-# Vayal — AgriMach MVP
+# Vayal — Farm Machinery Marketplace
 
-Voice-first agricultural machinery booking marketplace for Tamil Nadu.
+Vayal connects farmers who need agricultural machinery with local equipment owners who can provide it.
 
-## MVP features
-- Farmer machinery catalogue and booking requests
-- GPS coordinates or village/landmark-based location capture
-- Machinery owner listings and booking decisions
-- Tamil/English text booking assistant (deterministic prototype; not an LLM)
-- FastAPI backend with SQLite for local development and PostgreSQL for deployment
+## Product flow
+
+1. Choose an account type: **Farmer** or **Machinery Owner**.
+2. Sign up or sign in using a mobile number and password.
+3. Enter the workspace designed for that account type.
+
+### Farmer workspace
+- Browse available machinery by equipment type, village and district.
+- Submit a booking request with acreage, date and field location details.
+- Optionally share browser GPS coordinates.
+- Track requests and cancel pending requests.
+
+### Machinery Owner workspace
+- Register and manage your own machinery listings.
+- Set a per-acre service rate and availability.
+- Review requests that match your listed equipment type and district.
+- Accept a request by assigning one of your own matching machines, or decline it.
+
+## Authentication and access control
+
+- Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes; plaintext passwords are never stored.
+- The server issues an HTTP-only session cookie.
+- Farmer booking history and owner inventory are filtered by authenticated account.
+- Role checks are enforced by the API, not just by hiding frontend screens.
+- Sign-in is currently password-based. SMS OTP, phone-number verification, password reset and multi-factor authentication are not implemented yet.
 
 ## Run locally on Windows
+
 1. Install Python 3.12+.
-2. Clone or download this repository.
+2. Clone this repository.
 3. Run `run_windows.bat`.
 4. Open http://127.0.0.1:8000.
 
-By default, local development uses SQLite and creates `vayal.db` in the project root.
+Without `DATABASE_URL`, the app uses SQLite in the project directory and adds illustrative sample machinery listings for local testing.
 
 ## Run locally with PostgreSQL
+
 1. Copy `.env.example` to `.env`.
-2. Replace the placeholder with your PostgreSQL connection URL.
-3. Install dependencies and run the app:
+2. Set `DATABASE_URL` to your PostgreSQL connection string.
+3. Install dependencies and run:
 
 ```powershell
 python -m venv .venv
@@ -29,36 +50,35 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-The application selects PostgreSQL whenever `DATABASE_URL` is set. If it is not set, it uses local SQLite. Never commit a real database URL or password.
-
 ## Deploy to Vercel + Neon
-1. Create a PostgreSQL database in Neon.
-2. In Neon, open **Connect**, select the branch, database and role, and copy the **pooled** connection string. Keep `sslmode=require` and `channel_binding=require` if Neon includes them.
-3. Import this GitHub repository into Vercel. Keep the project root at the repository root.
-4. In Vercel, open **Project → Settings → Environment Variables**.
-5. Add `DATABASE_URL` with the Neon pooled connection string for **Production**, **Preview**, and **Development** as needed.
-6. Redeploy after adding or changing the environment variable.
 
-Vercel detects the FastAPI application through `app/index.py`. No custom build command is required for this project.
+1. Use a dedicated Neon database for Vayal.
+2. Add its pooled connection string as `DATABASE_URL` in Vercel.
+3. Set the variable for Production, Preview and Development as required.
+4. Redeploy after changing environment variables.
 
-The first application startup creates the required tables. Illustrative sample machinery listings are seeded only into local SQLite; a new PostgreSQL database starts empty, so production will not display fictional machines, owners, phone numbers or rates.
+The Vayal PostgreSQL schema is provisioned separately from the runtime role. The runtime `vayal_app` role should have read/write access to Vayal's tables, but should not have schema-creation privileges. The application verifies that the schema exists during startup.
 
-## Database behavior
-- `DATABASE_URL` set: PostgreSQL via Psycopg 3.
-- `DATABASE_URL` absent: SQLite for local development.
-- On Vercel, `DATABASE_URL` is mandatory. The app deliberately refuses to fall back to SQLite because Vercel's function filesystem is not durable.
+Never commit database credentials or passwords.
 
 ## API
+
 - `GET /api/health`
+- `POST /api/auth/signup`
+- `POST /api/auth/signin`
+- `POST /api/auth/signout`
+- `GET /api/me`
 - `GET /api/machines`
-- `POST /api/machines`
-- `POST /api/bookings`
-- `GET /api/bookings`
-- `PATCH /api/bookings/{booking_id}`
-- `POST /api/assistant/message`
+- `GET /api/my/machines` (machinery owner)
+- `POST /api/machines` (machinery owner)
+- `PATCH /api/machines/{machine_id}/availability` (machinery owner)
+- `POST /api/bookings` (farmer)
+- `GET /api/bookings` (role-filtered)
+- `PATCH /api/bookings/{booking_id}` (role-checked)
 - Interactive API docs: `/docs`
 
-## Important limitations
-This is an early local MVP, not production-ready. It has no user authentication, payment processing, verified providers, production-grade authorization, telephony integration, or live STT/LLM/TTS. The assistant is a rules-based conversation scaffold. Do not enter real personal data or expose it publicly before implementing authentication, authorization, validation, rate limiting, logging controls, backups, and a privacy policy.
+## Not yet included
 
-All booking prices and availability must come from the backend/database, never be invented by an LLM.
+This is an MVP, not a production-ready marketplace. It does not yet include SMS OTP, password recovery, payment collection, identity or machinery verification, telephony, live Tamil speech recognition or text-to-speech, dispute resolution, availability calendars, transport/mobilisation pricing, or production-grade rate limiting and audit monitoring. Confirm real machinery, prices and availability with the owner before relying on a booking.
+
+Booking acceptance is not a substitute for a service agreement between the farmer and machinery owner.
