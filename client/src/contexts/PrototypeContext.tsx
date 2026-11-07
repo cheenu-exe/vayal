@@ -13,6 +13,19 @@ function isValidDateInput(value: string) {
   return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 }
 
+function isMachineAvailableForDate(machine: MachineListing | undefined, date: string) {
+  return Boolean(
+    machine &&
+    machine.enabled &&
+    machine.verificationStatus === "verified" &&
+    isValidDateInput(date) &&
+    date >= todayInputValue() &&
+    date >= machine.availabilityStart &&
+    date <= machine.availabilityEnd &&
+    !machine.unavailableDates.includes(date)
+  );
+}
+
 function hasRentalConflict(bookings: Booking[], machineId: string, date: string, ignoreId?: string) {
   return bookings.some(booking =>
     booking.id !== ignoreId &&
@@ -136,9 +149,8 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     if (!currentUser || currentUser.role !== "farmer") return null;
     const machine = state.machines.find(item => item.id === input.machineId && item.enabled && item.verificationStatus === "verified");
     if (!machine || machine.ownerPhone === currentUser.phone) return null;
-    if (!isValidDateInput(input.requestedDate) || input.requestedDate < todayInputValue()) return null;
-    if (input.requestedDate < machine.availabilityStart || input.requestedDate > machine.availabilityEnd) return null;
-    if (machine.unavailableDates.includes(input.requestedDate) || hasRentalConflict(state.bookings, machine.id, input.requestedDate)) return null;
+    if (!isMachineAvailableForDate(machine, input.requestedDate)) return null;
+    if (hasRentalConflict(state.bookings, machine.id, input.requestedDate)) return null;
     if (!Number.isInteger(input.duration) || input.duration < 1 || input.duration > 30) return null;
     if (input.durationUnit !== "hours" && input.durationUnit !== "days") return null;
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.preferredTime)) return null;
@@ -176,13 +188,24 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
       const ownerCompletion = isOwner && status === "completed" && target.status === "on_site_verified";
       if (!ownerAction && !farmerAction && !ownerCompletion) return previous;
 
-      if (ownerAction && status === "accepted" && hasRentalConflict(previous.bookings, target.machineId, target.requestedDate, target.id)) {
-        return {
-          ...previous,
-          bookings: previous.bookings.map(booking => booking.id === id
-            ? { ...booking, ownerResponse: "This machine already has another accepted demo rental on that date. Keep this request pending or reject it." }
-            : booking),
-        };
+      if (ownerAction && status === "accepted") {
+        const machine = previous.machines.find(item => item.id === target.machineId && item.ownerPhone === currentUser.phone);
+        if (!isMachineAvailableForDate(machine, target.requestedDate)) {
+          return {
+            ...previous,
+            bookings: previous.bookings.map(booking => booking.id === id
+              ? { ...booking, ownerResponse: "This machine is no longer active or the requested date is outside its current availability. Review the listing before responding." }
+              : booking),
+          };
+        }
+        if (hasRentalConflict(previous.bookings, target.machineId, target.requestedDate, target.id)) {
+          return {
+            ...previous,
+            bookings: previous.bookings.map(booking => booking.id === id
+              ? { ...booking, ownerResponse: "This machine already has another accepted demo rental on that date. Keep this request pending or reject it." }
+              : booking),
+          };
+        }
       }
 
       const nextOtp = status === "accepted" ? makeOtp() : target.bookingOtp;
