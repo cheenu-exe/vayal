@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { makeDemoState } from "@/prototype/seed";
+import { todayInputValue } from "@/prototype/format";
 import type { Booking, BookingStatus, MachineDraft, MachineListing, NewBookingInput, Profile, PrototypeState, Role, VerificationStatus } from "@/prototype/types";
 
 const STORAGE_KEY = "vayal-prototype-state-v1";
