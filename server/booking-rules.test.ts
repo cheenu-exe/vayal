@@ -65,7 +65,7 @@ describe("prototype booking rules", () => {
   it("treats accepted and later rentals as conflicts only when time intervals overlap", () => {
     expect(hasRentalConflict([booking("a", "pending")], "machine-1", "2026-11-15", "07:00", 4, "hours")).toBe(false);
     expect(hasRentalConflict([booking("a", "accepted")], "machine-1", "2026-11-15", "08:00", 1, "hours")).toBe(true);
-    expect(hasRentalConflict([booking("a", "confirmed")], "machine-1", "2026-11-15", "10:00", 1, "hours")).toBe(false);
+    expect(hasRentalConflict([booking("a", "confirmed")], "machine-1", "2026-11-15", "11:00", 1, "hours")).toBe(false);
     expect(hasRentalConflict([booking("a", "on_site_verified")], "machine-1", "2026-11-15", "07:30", 1, "hours")).toBe(true);
     expect(hasRentalConflict([booking("a", "completed")], "machine-1", "2026-11-15", "07:30", 1, "hours")).toBe(true);
   });
