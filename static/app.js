@@ -295,7 +295,7 @@ function renderOwnerBookings() {
     const price = booking.estimated_total == null ? "Quote not set" : "Estimated ₹" + Number(booking.estimated_total).toLocaleString("en-IN");
     return '<article class="request-card"><div class="request-main"><h3>' + escapeHTML(booking.machine_type) +
       ' · ' + escapeHTML(booking.acres) + ' acres</h3><p>Farmer: ' + escapeHTML(booking.farmer_name) + ' · ' +
-      escapeHTML(booking.farmer_phone) + '</p><p>' + escapeHTML(booking.village) + ', ' + escapeHTML(booking.district) +
+      (booking.farmer_phone ? escapeHTML(booking.farmer_phone) : 'Contact details after acceptance') + '</p><p>' + escapeHTML(booking.village) + ', ' + escapeHTML(booking.district) +
       ' · ' + escapeHTML(booking.booking_date) + '</p><p>' + escapeHTML(booking.landmark || booking.directions || "No field directions provided") +
       ' · ' + escapeHTML(price) + '</p></div>' + actions + '</article>';
   }).join("");
