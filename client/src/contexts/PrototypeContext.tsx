@@ -3,6 +3,23 @@ import { makeDemoState } from "@/prototype/seed";
 import type { Booking, BookingStatus, MachineDraft, MachineListing, NewBookingInput, Profile, PrototypeState, Role, VerificationStatus } from "@/prototype/types";
 
 const STORAGE_KEY = "vayal-prototype-state-v1";
+const RENTAL_BLOCKING_STATUSES: BookingStatus[] = ["accepted", "confirmed", "on_site_verified", "completed"];
+
+function isValidDateInput(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function hasRentalConflict(bookings: Booking[], machineId: string, date: string, ignoreId?: string) {
+  return bookings.some(booking =>
+    booking.id !== ignoreId &&
+    booking.machineId === machineId &&
+    booking.requestedDate === date &&
+    RENTAL_BLOCKING_STATUSES.includes(booking.status)
+  );
+}
 
 export function normalizePhone(value: string) {
   const digits = value.replace(/\D/g, "");
@@ -23,13 +40,28 @@ function readState(): PrototypeState {
   }
 }
 
-function createBookingId() {
-  const suffix = Math.floor(1000 + Math.random() * 9000);
-  return `VY-${suffix}`;
+function randomInteger(min: number, max: number) {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const value = new Uint32Array(1);
+    crypto.getRandomValues(value);
+    return min + (value[0] % (max - min + 1));
+  }
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function createBookingId(bookings: Booking[]) {
+  let id = "";
+  do {
+    const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID().slice(0, 8)
+      : Date.now().toString(36) + "-" + randomInteger(1000, 999999).toString(36);
+    id = "VY-" + suffix.toUpperCase();
+  } while (bookings.some(booking => booking.id === id));
+  return id;
 }
 
 function makeOtp() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(randomInteger(100000, 999999));
 }
 
 interface PrototypeContextValue {
@@ -43,6 +75,7 @@ interface PrototypeContextValue {
   createBooking: (input: NewBookingInput) => string | null;
   changeBookingStatus: (id: string, status: BookingStatus, response?: string) => void;
   confirmFarmerPresence: (id: string) => void;
+  confirmOperatorArrival: (id: string) => void;
   verifyOnSite: (id: string, enteredOtp: string) => boolean;
   completeRental: (id: string) => void;
   createMachine: (draft: MachineDraft) => string | null;
@@ -101,13 +134,29 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const createBooking = useCallback((input: NewBookingInput) => {
     if (!currentUser || currentUser.role !== "farmer") return null;
     const machine = state.machines.find(item => item.id === input.machineId && item.enabled && item.verificationStatus === "verified");
-    if (!machine) return null;
+    if (!machine || machine.ownerPhone === currentUser.phone) return null;
+    if (!isValidDateInput(input.requestedDate) || input.requestedDate < todayInputValue()) return null;
+    if (input.requestedDate < machine.availabilityStart || input.requestedDate > machine.availabilityEnd) return null;
+    if (machine.unavailableDates.includes(input.requestedDate) || hasRentalConflict(state.bookings, machine.id, input.requestedDate)) return null;
+    if (!Number.isInteger(input.duration) || input.duration < 1 || input.duration > 30) return null;
+    if (input.durationUnit !== "hours" && input.durationUnit !== "days") return null;
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.preferredTime)) return null;
+    const location = {
+      village: input.farmLocation.village.trim(),
+      town: input.farmLocation.town.trim(),
+      district: input.farmLocation.district.trim(),
+      pinCode: input.farmLocation.pinCode.trim(),
+    };
+    if (!location.village || !location.district || (location.pinCode && !/^\d{6}$/.test(location.pinCode))) return null;
     const rate = input.durationUnit === "hours" ? machine.hourlyRate : machine.dailyRate;
+    if (!Number.isFinite(rate) || rate <= 0 || !Number.isFinite(machine.transportCharge) || machine.transportCharge < 0) return null;
+    const estimatedAmount = rate * input.duration + machine.transportCharge;
+    if (!Number.isFinite(estimatedAmount)) return null;
     const booking: Booking = {
-      id: createBookingId(), farmerPhone: currentUser.phone, farmerName: currentUser.name, ownerPhone: machine.ownerPhone, ownerName: machine.ownerName,
+      id: createBookingId(state.bookings), farmerPhone: currentUser.phone, farmerName: currentUser.name, ownerPhone: machine.ownerPhone, ownerName: machine.ownerName,
       machineId: machine.id, machineName: machine.name, machinePhoto: machine.photos[0], requestedDate: input.requestedDate, preferredTime: input.preferredTime,
-      duration: input.duration, durationUnit: input.durationUnit, farmLocation: input.farmLocation, instructions: input.instructions,
-      estimatedAmount: rate * input.duration + machine.transportCharge, status: "pending", bookingOtp: "", farmerPresent: false, operatorPresent: false,
+      duration: input.duration, durationUnit: input.durationUnit, farmLocation: location, instructions: input.instructions.trim().slice(0, 500),
+      estimatedAmount, status: "pending", bookingOtp: "", farmerPresent: false, operatorPresent: false, operatorArrivalConfirmed: false,
       ownerResponse: "", createdAt: new Date().toISOString(),
     };
     setState(previous => ({ ...previous, bookings: [booking, ...previous.bookings] }));
@@ -116,20 +165,33 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
 
   const changeBookingStatus = useCallback((id: string, status: BookingStatus, response = "") => {
     if (!currentUser) return;
-    setState(previous => ({
-      ...previous,
-      bookings: previous.bookings.map(booking => {
-        if (booking.id !== id) return booking;
-        const isOwner = currentUser.role === "owner" && booking.ownerPhone === currentUser.phone;
-        const isFarmer = currentUser.role === "farmer" && booking.farmerPhone === currentUser.phone;
-        const ownerAction = isOwner && ((status === "accepted" || status === "rejected") && booking.status === "pending");
-        const farmerAction = isFarmer && ((status === "confirmed" && booking.status === "accepted") || (status === "cancelled" && ["pending", "accepted", "confirmed"].includes(booking.status)));
-        const ownerCompletion = isOwner && status === "completed" && booking.status === "on_site_verified";
-        if (!ownerAction && !farmerAction && !ownerCompletion) return booking;
-        const nextOtp = status === "accepted" ? makeOtp() : booking.bookingOtp;
-        return { ...booking, status, bookingOtp: nextOtp, ownerResponse: response || booking.ownerResponse };
-      }),
-    }));
+    setState(previous => {
+      const target = previous.bookings.find(booking => booking.id === id);
+      if (!target) return previous;
+      const isOwner = currentUser.role === "owner" && target.ownerPhone === currentUser.phone;
+      const isFarmer = currentUser.role === "farmer" && target.farmerPhone === currentUser.phone;
+      const ownerAction = isOwner && ((status === "accepted" || status === "rejected") && target.status === "pending");
+      const farmerAction = isFarmer && ((status === "confirmed" && target.status === "accepted") || (status === "cancelled" && ["pending", "accepted", "confirmed"].includes(target.status)));
+      const ownerCompletion = isOwner && status === "completed" && target.status === "on_site_verified";
+      if (!ownerAction && !farmerAction && !ownerCompletion) return previous;
+
+      if (ownerAction && status === "accepted" && hasRentalConflict(previous.bookings, target.machineId, target.requestedDate, target.id)) {
+        return {
+          ...previous,
+          bookings: previous.bookings.map(booking => booking.id === id
+            ? { ...booking, ownerResponse: "This machine already has another accepted demo rental on that date. Keep this request pending or reject it." }
+            : booking),
+        };
+      }
+
+      const nextOtp = status === "accepted" ? makeOtp() : target.bookingOtp;
+      return {
+        ...previous,
+        bookings: previous.bookings.map(booking => booking.id === id
+          ? { ...booking, status, bookingOtp: nextOtp, ownerResponse: response || booking.ownerResponse }
+          : booking),
+      };
+    });
   }, [currentUser]);
 
   const confirmFarmerPresence = useCallback((id: string) => {
@@ -140,10 +202,25 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     }));
   }, [currentUser]);
 
+  const confirmOperatorArrival = useCallback((id: string) => {
+    if (!currentUser || currentUser.role !== "owner") return;
+    setState(previous => ({
+      ...previous,
+      bookings: previous.bookings.map(booking =>
+        booking.id === id &&
+        booking.ownerPhone === currentUser.phone &&
+        booking.status === "confirmed" &&
+        booking.farmerPresent
+          ? { ...booking, operatorArrivalConfirmed: true }
+          : booking
+      ),
+    }));
+  }, [currentUser]);
+
   const verifyOnSite = useCallback((id: string, enteredOtp: string) => {
     if (!currentUser || currentUser.role !== "owner") return false;
     const booking = state.bookings.find(item => item.id === id && item.ownerPhone === currentUser.phone && item.status === "confirmed");
-    if (!booking || !booking.farmerPresent || !booking.bookingOtp || enteredOtp.trim() !== booking.bookingOtp) return false;
+    if (!booking || !booking.farmerPresent || !booking.operatorArrivalConfirmed || !booking.bookingOtp || enteredOtp.trim() !== booking.bookingOtp) return false;
     setState(previous => ({
       ...previous,
       bookings: previous.bookings.map(item => item.id === id ? { ...item, status: "on_site_verified", operatorPresent: true } : item),
@@ -177,7 +254,13 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     if (!currentUser || currentUser.role !== "owner") return;
     setState(previous => ({
       ...previous,
-      machines: previous.machines.map(machine => machine.id === id && machine.ownerPhone === currentUser.phone ? { ...machine, ...patch } : machine),
+      machines: previous.machines.map(machine => machine.id === id && machine.ownerPhone === currentUser.phone ? {
+        ...machine,
+        ...patch,
+        verificationStatus: "submitted",
+        verificationReason: "Machine details were edited. This listing has been returned to simulated review and must be marked Verified again.",
+        enabled: false,
+      } : machine),
     }));
   }, [currentUser]);
 
@@ -209,7 +292,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
 
   const value: PrototypeContextValue = {
     state, currentUser, findProfile, beginSession, completeRegistration, signOut, updateProfile, createBooking, changeBookingStatus,
-    confirmFarmerPresence, verifyOnSite, completeRental, createMachine, updateMachine, changeVerification, toggleMachine, resetPrototype,
+    confirmFarmerPresence, confirmOperatorArrival, verifyOnSite, completeRental, createMachine, updateMachine, changeVerification, toggleMachine, resetPrototype,
   };
 
   return <PrototypeContext.Provider value={value}>{children}</PrototypeContext.Provider>;

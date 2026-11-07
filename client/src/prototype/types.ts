@@ -105,6 +105,7 @@ export interface Booking {
   status: BookingStatus;
   bookingOtp: string;
   farmerPresent: boolean;
+  operatorArrivalConfirmed?: boolean;
   operatorPresent: boolean;
   ownerResponse: string;
   createdAt: string;
