@@ -103,6 +103,22 @@ def connect():
 
 
 def init_db():
+    if USE_POSTGRES:
+        required = (
+            "machines", "bookings", "vayal_users", "vayal_sessions",
+            "vayal_machine_owners", "vayal_booking_farmers",
+        )
+        placeholders = ",".join("?" for _ in required)
+        with closing(connect()) as db:
+            row = db.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_name IN (" + placeholders + ")",
+                required,
+            ).fetchone()
+            if row[0] != len(required):
+                raise RuntimeError("Vayal PostgreSQL schema is incomplete. Apply the Vayal database migration before starting the app.")
+        return
+
     with closing(connect()) as db:
         db.executescript("""
         CREATE TABLE IF NOT EXISTS machines (
@@ -142,7 +158,7 @@ def init_db():
         );
         """)
         count = db.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
-        if count == 0 and not USE_POSTGRES:
+        if count == 0:
             demo = [
                 ("m1","Demo Owner A","9000000001","Tractor","Tractor + plough","Pollachi","Coimbatore","Demo listing",1500,1,"Illustrative listing; verify before use"),
                 ("m2","Demo Owner B","9000000002","Rotavator","Tractor rotavator","Kinathukadavu","Coimbatore","Demo listing",1800,1,"Illustrative listing; verify before use"),
