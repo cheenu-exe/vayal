@@ -174,7 +174,7 @@ def startup():
 
 
 def normalize_phone(phone: str) -> str:
-    return re.sub(r"[\\s()-]", "", phone.strip())
+    return re.sub(r"[\s()-]", "", phone.strip())
 
 
 def hash_password(password: str) -> str:
@@ -249,7 +249,7 @@ class SignUpInput(BaseModel):
     @model_validator(mode="after")
     def clean_phone(self):
         self.phone = normalize_phone(self.phone)
-        if not re.fullmatch(r"\\+?[0-9]{8,15}", self.phone):
+        if not re.fullmatch(r"\+?[0-9]{8,15}", self.phone):
             raise ValueError("Enter a valid phone number.")
         return self
 
