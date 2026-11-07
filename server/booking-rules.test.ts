@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Booking, MachineListing } from "../client/src/prototype/types";
-import { hasRentalConflict, isMachineAvailableForDate, isValidDateInput } from "../client/src/prototype/bookingRules";
+import {
+  getRentalDates,
+  getRentalEndDate,
+  hasRentalConflict,
+  isMachineAvailableForDate,
+  isMachineAvailableForRental,
+  isValidDateInput,
+} from "../client/src/prototype/bookingRules";
 
 const baseMachine = {
   id: "machine-1",
@@ -11,8 +18,16 @@ const baseMachine = {
   unavailableDates: ["2026-11-12"],
 } as unknown as MachineListing;
 
-function booking(id: string, status: Booking["status"], date = "2026-11-15"): Booking {
-  return { id, machineId: "machine-1", status, requestedDate: date } as Booking;
+function booking(
+  id: string,
+  status: Booking["status"],
+  date = "2026-11-15",
+  time = "07:00",
+  duration = 4,
+  durationUnit: "hours" | "days" = "hours",
+  machineId = "machine-1"
+): Booking {
+  return { id, machineId, status, requestedDate: date, preferredTime: time, duration, durationUnit } as Booking;
 }
 
 describe("prototype booking rules", () => {
@@ -33,17 +48,36 @@ describe("prototype booking rules", () => {
     expect(isMachineAvailableForDate(baseMachine, "2026-11-06", "2026-11-07")).toBe(false);
   });
 
-  it("treats accepted and later rentals as date conflicts but ignores pending requests", () => {
-    expect(hasRentalConflict([booking("a", "pending")], "machine-1", "2026-11-15")).toBe(false);
-    expect(hasRentalConflict([booking("a", "accepted")], "machine-1", "2026-11-15")).toBe(true);
-    expect(hasRentalConflict([booking("a", "confirmed")], "machine-1", "2026-11-15")).toBe(true);
-    expect(hasRentalConflict([booking("a", "on_site_verified")], "machine-1", "2026-11-15")).toBe(true);
-    expect(hasRentalConflict([booking("a", "completed")], "machine-1", "2026-11-15")).toBe(true);
+  it("calculates full date spans for multi-day and overnight rentals", () => {
+    expect(getRentalEndDate("2026-11-15", "07:00", 1, "days")).toBe("2026-11-16");
+    expect(getRentalEndDate("2026-11-15", "07:00", 3, "days")).toBe("2026-11-18");
+    expect(getRentalEndDate("2026-11-15", "23:00", 3, "hours")).toBe("2026-11-16");
+    expect(getRentalDates("2026-11-15", "23:00", 3, "hours")).toEqual(["2026-11-15", "2026-11-16"]);
   });
 
-  it("ignores the booking being accepted and does not conflict across dates or machines", () => {
-    expect(hasRentalConflict([booking("a", "accepted")], "machine-1", "2026-11-15", "a")).toBe(false);
-    expect(hasRentalConflict([booking("a", "accepted", "2026-11-16")], "machine-1", "2026-11-15")).toBe(false);
-    expect(hasRentalConflict([booking("a", "accepted")], "machine-2", "2026-11-15")).toBe(false);
+  it("rejects rentals that extend beyond the service window or across blocked dates", () => {
+    const shortWindow = { ...baseMachine, availabilityEnd: "2026-11-16", unavailableDates: [] } as MachineListing;
+    expect(isMachineAvailableForRental(shortWindow, "2026-11-15", "07:00", 1, "days", "2026-11-07")).toBe(true);
+    expect(isMachineAvailableForRental(shortWindow, "2026-11-15", "07:00", 2, "days", "2026-11-07")).toBe(false);
+    expect(isMachineAvailableForRental(baseMachine, "2026-11-11", "07:00", 2, "days", "2026-11-07")).toBe(false);
+  });
+
+  it("treats accepted and later rentals as conflicts only when time intervals overlap", () => {
+    expect(hasRentalConflict([booking("a", "pending")], "machine-1", "2026-11-15", "07:00", 4, "hours")).toBe(false);
+    expect(hasRentalConflict([booking("a", "accepted")], "machine-1", "2026-11-15", "08:00", 1, "hours")).toBe(true);
+    expect(hasRentalConflict([booking("a", "confirmed")], "machine-1", "2026-11-15", "10:00", 1, "hours")).toBe(false);
+    expect(hasRentalConflict([booking("a", "on_site_verified")], "machine-1", "2026-11-15", "07:30", 1, "hours")).toBe(true);
+    expect(hasRentalConflict([booking("a", "completed")], "machine-1", "2026-11-15", "07:30", 1, "hours")).toBe(true);
+  });
+
+  it("blocks a candidate that overlaps any part of a multi-day or overnight booking", () => {
+    expect(hasRentalConflict([booking("a", "accepted", "2026-11-15", "07:00", 3, "days")], "machine-1", "2026-11-17", "08:00", 2, "hours")).toBe(true);
+    expect(hasRentalConflict([booking("a", "accepted", "2026-11-15", "23:00", 3, "hours")], "machine-1", "2026-11-16", "01:00", 1, "hours")).toBe(true);
+    expect(hasRentalConflict([booking("a", "accepted", "2026-11-15", "07:00", 3, "days")], "machine-1", "2026-11-18", "07:00", 1, "hours")).toBe(false);
+  });
+
+  it("ignores the booking being accepted and does not conflict across machines", () => {
+    expect(hasRentalConflict([booking("a", "accepted")], "machine-1", "2026-11-15", "07:00", 4, "hours", "a")).toBe(false);
+    expect(hasRentalConflict([booking("a", "accepted")], "machine-2", "2026-11-15", "07:00", 4, "hours")).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { makeDemoState } from "@/prototype/seed";
-import { hasRentalConflict, isMachineAvailableForDate } from "@/prototype/bookingRules";
+import { hasRentalConflict, isMachineAvailableForRental } from "@/prototype/bookingRules";
 import type { Booking, BookingStatus, MachineDraft, MachineListing, NewBookingInput, Profile, PrototypeState, Role, VerificationStatus } from "@/prototype/types";
 
 const STORAGE_KEY = "vayal-prototype-state-v1";
@@ -117,13 +117,13 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
 
   const createBooking = useCallback((input: NewBookingInput) => {
     if (!currentUser || currentUser.role !== "farmer") return null;
-    const machine = state.machines.find(item => item.id === input.machineId && item.enabled && item.verificationStatus === "verified");
-    if (!machine || machine.ownerPhone === currentUser.phone) return null;
-    if (!isMachineAvailableForDate(machine, input.requestedDate)) return null;
-    if (hasRentalConflict(state.bookings, machine.id, input.requestedDate)) return null;
     if (!Number.isInteger(input.duration) || input.duration < 1 || input.duration > 30) return null;
     if (input.durationUnit !== "hours" && input.durationUnit !== "days") return null;
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.preferredTime)) return null;
+    const machine = state.machines.find(item => item.id === input.machineId && item.enabled && item.verificationStatus === "verified");
+    if (!machine || machine.ownerPhone === currentUser.phone) return null;
+    if (!isMachineAvailableForRental(machine, input.requestedDate, input.preferredTime, input.duration, input.durationUnit)) return null;
+    if (hasRentalConflict(state.bookings, machine.id, input.requestedDate, input.preferredTime, input.duration, input.durationUnit)) return null;
     const location = {
       village: input.farmLocation.village.trim(),
       town: input.farmLocation.town.trim(),
@@ -160,7 +160,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
 
       if (ownerAction && status === "accepted") {
         const machine = previous.machines.find(item => item.id === target.machineId && item.ownerPhone === currentUser.phone);
-        if (!isMachineAvailableForDate(machine, target.requestedDate)) {
+        if (!isMachineAvailableForRental(machine, target.requestedDate, target.preferredTime, target.duration, target.durationUnit)) {
           return {
             ...previous,
             bookings: previous.bookings.map(booking => booking.id === id
@@ -168,11 +168,11 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
               : booking),
           };
         }
-        if (hasRentalConflict(previous.bookings, target.machineId, target.requestedDate, target.id)) {
+        if (hasRentalConflict(previous.bookings, target.machineId, target.requestedDate, target.preferredTime, target.duration, target.durationUnit, target.id)) {
           return {
             ...previous,
             bookings: previous.bookings.map(booking => booking.id === id
-              ? { ...booking, ownerResponse: "This machine already has another accepted demo rental on that date. Keep this request pending or reject it." }
+              ? { ...booking, ownerResponse: "This machine already has another accepted rental that overlaps this time window. Keep this request pending or reject it." }
               : booking),
           };
         }

@@ -5,7 +5,8 @@ import { MarketplaceLayout } from "@/components/MarketplaceLayout";
 import { BookingStatusBadge, VerificationBadge } from "@/components/StatusBadge";
 import { DemoNotice, PageHeading } from "@/components/PageHeading";
 import { usePrototype } from "@/contexts/PrototypeContext";
-import { formatDate, formatRupees, isDateBlocked, todayInputValue } from "@/prototype/format";
+import { formatDate, formatRupees, todayInputValue } from "@/prototype/format";
+import { getRentalDates, getRentalEndDate, hasRentalConflict, isMachineAvailableForRental, isValidDateInput } from "@/prototype/bookingRules";
 import type { NewBookingInput } from "@/prototype/types";
 
 const blankLocation = { village: "", town: "", district: "", pinCode: "" };
@@ -15,11 +16,16 @@ export default function MachineDetail() {
   const { state, currentUser, createBooking } = usePrototype();
   const [, setLocation] = useLocation();
   const machine = state.machines.find(item => item.id === params?.id && item.enabled && item.verificationStatus === "verified");
-  const alreadyBookedDates = useMemo(() => new Set(
+  const alreadyBookedDates = useMemo(() => {
+    const dates = new Set<string>();
     state.bookings
       .filter(booking => booking.machineId === machine?.id && ["accepted", "confirmed", "on_site_verified", "completed"].includes(booking.status))
-      .map(booking => booking.requestedDate)
-  ), [state.bookings, machine?.id]);
+      .forEach(booking => {
+        getRentalDates(booking.requestedDate, booking.preferredTime, booking.duration, booking.durationUnit)
+          .forEach(date => dates.add(date));
+      });
+    return dates;
+  }, [state.bookings, machine?.id]);
   const [form, setForm] = useState({ requestedDate: "", preferredTime: "07:00", duration: "4", durationUnit: "hours" as "hours" | "days", farmLocation: { ...blankLocation }, instructions: "" });
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState("");
@@ -37,12 +43,16 @@ export default function MachineDetail() {
     event.preventDefault();
     setError("");
     if (!currentUser || currentUser.role !== "farmer") { setError("Sign in as a Farm Holder to request this sample machine."); return; }
-    if (!form.requestedDate || form.requestedDate < dateMin) { setError("Choose a date inside this machine's available service window."); return; }
-    if (form.requestedDate > machine.availabilityEnd) { setError("That date is after this machine's listed availability window."); return; }
-    if (isDateBlocked(form.requestedDate, machine.unavailableDates)) { setError("That sample date is marked unavailable. Choose another date."); return; }
-    if (alreadyBookedDates.has(form.requestedDate)) { setError("This machine already has an accepted demo rental on that date. Choose another date."); return; }
+    if (!isValidDateInput(form.requestedDate) || form.requestedDate < dateMin) { setError("Choose a valid date inside this machine's available service window."); return; }
     const duration = Number(form.duration);
     if (!Number.isInteger(duration) || duration < 1 || duration > 30) { setError("Choose a rental duration between 1 and 30."); return; }
+    const rentalEndDate = getRentalEndDate(form.requestedDate, form.preferredTime, duration, form.durationUnit);
+    if (!rentalEndDate) { setError("Choose a valid date, time and rental duration."); return; }
+    if (rentalEndDate > machine.availabilityEnd) { setError("This rental would extend beyond the machine's listed availability window."); return; }
+    const rentalDates = getRentalDates(form.requestedDate, form.preferredTime, duration, form.durationUnit);
+    if (rentalDates.some(date => machine.unavailableDates.includes(date))) { setError("Part of this rental overlaps a date the owner marked unavailable."); return; }
+    if (hasRentalConflict(state.bookings, machine.id, form.requestedDate, form.preferredTime, duration, form.durationUnit)) { setError("This time window overlaps another accepted rental. Choose a different date or time."); return; }
+    if (!isMachineAvailableForRental(machine, form.requestedDate, form.preferredTime, duration, form.durationUnit)) { setError("This machine is not available for the entire requested rental window."); return; }
     if (!form.farmLocation.village.trim() || !form.farmLocation.district.trim()) { setError("Add the farm village and district before reviewing the request."); return; }
     setReviewing(true);
   };
@@ -79,6 +89,6 @@ export default function MachineDetail() {
         <form className="booking-form" onSubmit={submitForReview}><label className="form-label">Required date<input type="date" min={dateMin} max={machine.availabilityEnd} value={form.requestedDate} onChange={event => setForm({ ...form, requestedDate: event.target.value })} required /></label><div className="form-row"><label className="form-label">Preferred time<input type="time" value={form.preferredTime} onChange={event => setForm({ ...form, preferredTime: event.target.value })} required /></label><label className="form-label">Duration<select value={form.durationUnit} onChange={event => setForm({ ...form, durationUnit: event.target.value as "hours" | "days" })}><option value="hours">Hours</option><option value="days">Days</option></select></label></div><label className="form-label">Number of {form.durationUnit}<input type="number" min="1" max="30" value={form.duration} onChange={event => setForm({ ...form, duration: event.target.value })} required /></label><div className="form-section-rule"><span>FARM LOCATION</span></div><div className="form-row"><label className="form-label">Village<input value={form.farmLocation.village} onChange={event => setForm({ ...form, farmLocation: { ...form.farmLocation, village: event.target.value } })} placeholder={currentUser?.role === "farmer" ? currentUser.village : "Village"} required /></label><label className="form-label">Town / taluk<input value={form.farmLocation.town} onChange={event => setForm({ ...form, farmLocation: { ...form.farmLocation, town: event.target.value } })} placeholder={currentUser?.role === "farmer" ? currentUser.town : "Town"} /></label></div><div className="form-row"><label className="form-label">District<input value={form.farmLocation.district} onChange={event => setForm({ ...form, farmLocation: { ...form.farmLocation, district: event.target.value } })} placeholder={currentUser?.role === "farmer" ? currentUser.district : "District"} required /></label><label className="form-label">PIN code<input inputMode="numeric" maxLength={6} value={form.farmLocation.pinCode} onChange={event => setForm({ ...form, farmLocation: { ...form.farmLocation, pinCode: event.target.value.replace(/\D/g, "") } })} placeholder={currentUser?.role === "farmer" ? currentUser.pinCode : "PIN"} /></label></div><label className="form-label">Additional instructions<textarea rows={3} maxLength={500} value={form.instructions} onChange={event => setForm({ ...form, instructions: event.target.value })} placeholder="Field access, crop or transport details…" /></label><div className="booking-estimate"><span>Illustrative estimate · includes listed transport</span><b>{formatRupees(estimate)}</b></div><button className="button button-primary full-width" type="submit">Book Machine <ArrowRight size={16} /></button>{error && <p className="form-error" role="alert">{error} {(!currentUser || currentUser.role !== "farmer") && <Link href="/auth/farmer">Sign in as Farm Holder →</Link>}</p>}<p className="booking-small-print"><Clock3 size={13} /> A request stays pending until an owner accepts. Prototype requests are stored only in this browser.</p></form>
       </aside>
     </div>
-    {reviewing && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setReviewing(false); }}><section className="review-modal" role="dialog" aria-modal="true" aria-labelledby="review-title"><button className="modal-close" onClick={() => setReviewing(false)} aria-label="Close"><X size={18} /></button><span className="eyebrow"><i className="eyebrow-rule" /> BEFORE YOU SUBMIT</span><h2 id="review-title">Review this demo request.</h2><p>The following summary will be saved to local browser storage only.</p><div className="review-summary"><div><small>Machine</small><b>{machine.name}</b></div><div><small>Date & preferred time</small><b>{formatDate(form.requestedDate)} · {form.preferredTime}</b></div><div><small>Rental duration</small><b>{form.duration} {form.durationUnit}</b></div><div><small>Farm location</small><b>{form.farmLocation.village}, {form.farmLocation.town}, {form.farmLocation.district} {form.farmLocation.pinCode}</b></div><div><small>Estimated total · demo only</small><b>{formatRupees(estimate)}</b></div></div><div className="modal-actions"><button className="button button-secondary" onClick={() => setReviewing(false)}>Edit request</button><button className="button button-primary" onClick={confirmBooking}>Submit local demo request <Check size={16} /></button></div><small className="modal-disclaimer">No owner is contacted. No payment is taken.</small></section></div>}
+    {reviewing && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setReviewing(false); }}><section className="review-modal" role="dialog" aria-modal="true" aria-labelledby="review-title"><button className="modal-close" onClick={() => setReviewing(false)} aria-label="Close"><X size={18} /></button><span className="eyebrow"><i className="eyebrow-rule" /> BEFORE YOU SUBMIT</span><h2 id="review-title">Review this demo request.</h2><p>The following summary will be saved to local browser storage only.</p><div className="review-summary"><div><small>Machine</small><b>{machine.name}</b></div><div><small>Rental window</small><b>{formatDate(form.requestedDate)} {form.preferredTime} – {formatDate(getRentalEndDate(form.requestedDate, form.preferredTime, Number(form.duration), form.durationUnit) || form.requestedDate)}</b></div><div><small>Rental duration</small><b>{form.duration} {form.durationUnit}</b></div><div><small>Farm location</small><b>{form.farmLocation.village}, {form.farmLocation.town}, {form.farmLocation.district} {form.farmLocation.pinCode}</b></div><div><small>Estimated total · demo only</small><b>{formatRupees(estimate)}</b></div></div><div className="modal-actions"><button className="button button-secondary" onClick={() => setReviewing(false)}>Edit request</button><button className="button button-primary" onClick={confirmBooking}>Submit local demo request <Check size={16} /></button></div><small className="modal-disclaimer">No owner is contacted. No payment is taken.</small></section></div>}
   </section></MarketplaceLayout>;
 }
