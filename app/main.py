@@ -190,7 +190,7 @@ def home():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "vayal", "version": app.version}
+    return {"status": "ok", "service": "vayal", "version": app.version, "database": "postgresql" if USE_POSTGRES else "sqlite"}
 
 
 @app.get("/api/machines")
