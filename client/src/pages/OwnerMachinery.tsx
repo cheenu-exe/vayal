@@ -1,0 +1,18 @@
+import { ArrowRight, CalendarDays, Edit3, MapPin, Pause, Play, Plus, ShieldCheck, Tractor } from "lucide-react";
+import { Link } from "wouter";
+import { MarketplaceLayout } from "@/components/MarketplaceLayout";
+import { VerificationBadge } from "@/components/StatusBadge";
+import { DemoNotice, PageHeading } from "@/components/PageHeading";
+import { RoleGate } from "@/components/RoleGate";
+import { usePrototype } from "@/contexts/PrototypeContext";
+import { formatRupees } from "@/prototype/format";
+
+function MachineInventory() {
+  const { state, currentUser, toggleMachine } = usePrototype();
+  const machines = state.machines.filter(machine => machine.ownerPhone === currentUser?.phone);
+  return <MarketplaceLayout><section className="inventory-page page-container"><PageHeading eyebrow="MACHINERY OWNER WORKSPACE" title="My Machinery" description="Manage your local demo listings, rates and availability." action={<Link className="button button-primary" href="/owner/machinery/new"><Plus size={16} /> Add Machinery</Link>} /><DemoNotice>Only listings in the simulated Verified state and marked active appear in Farm Holder discovery. No actual document review has occurred.</DemoNotice>{machines.length ? <div className="inventory-list">{machines.map(machine => <article className="inventory-card" key={machine.id}><div className="inventory-photo"><img src={machine.photos[0]} alt={machine.name} /><span>DEMO</span></div><div className="inventory-info"><div className="inventory-title-row"><span className="eyebrow">{machine.category}</span><VerificationBadge status={machine.verificationStatus} /></div><h2>{machine.name}</h2><p>{machine.manufacturer} {machine.model} · {machine.year} · {machine.condition}</p><div className="inventory-meta"><span><MapPin size={14} />{machine.village}, {machine.town}, {machine.district}</span><span><CalendarDays size={14} />{machine.availabilityStart} to {machine.availabilityEnd}</span></div><div className="inventory-prices"><span><b>{formatRupees(machine.hourlyRate)}</b> / hour</span><span><b>{formatRupees(machine.dailyRate)}</b> / day</span><span><b>{formatRupees(machine.transportCharge)}</b> transport estimate</span></div>{machine.verificationReason && <small className="inventory-review-note">{machine.verificationReason}</small>}</div><div className="inventory-actions"><span className={`listing-state ${machine.enabled && machine.verificationStatus === "verified" ? "listing-active" : "listing-inactive"}`}><i />{machine.enabled && machine.verificationStatus === "verified" ? "Active · demo" : "Not visible to farmers"}</span><Link className="button button-secondary" href={`/owner/machinery/${machine.id}`}><Edit3 size={14} /> Edit</Link>{machine.verificationStatus === "verified" && <button className="button button-quiet" onClick={() => toggleMachine(machine.id)}>{machine.enabled ? <><Pause size={14} /> Pause listing</> : <><Play size={14} /> Resume listing</>}</button>}<Link className="text-link" href="/owner/verification"><ShieldCheck size={14} /> Review details</Link></div></article>)}</div> : <div className="empty-state"><span><Tractor size={23} /></span><h3>No machinery in this local owner profile</h3><p>Add a demo machine to try the six-step registration journey.</p><Link className="button button-primary" href="/owner/machinery/new">Add Machinery <ArrowRight size={15} /></Link></div>}<div className="inventory-note"><ShieldCheck size={16} /><span>Editing a machine saves to browser-local data. New listings start as “Submitted” and are hidden until the demo review is marked Verified.</span></div></section></MarketplaceLayout>;
+}
+
+export default function OwnerMachinery() {
+  return <RoleGate role="owner"><MachineInventory /></RoleGate>;
+}
