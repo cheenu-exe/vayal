@@ -18,15 +18,14 @@ Voice-first agricultural machinery booking marketplace for Tamil Nadu.
 By default, local development uses SQLite and creates `vayal.db` in the project root.
 
 ## Run locally with PostgreSQL
-1. Copy `.env.example` to `.env` or set `DATABASE_URL` in your terminal.
-2. Set `DATABASE_URL` to your PostgreSQL connection URL.
+1. Copy `.env.example` to `.env`.
+2. Replace the placeholder with your PostgreSQL connection URL.
 3. Install dependencies and run the app:
 
 ```powershell
 python -m venv .venv
 .venv\\Scripts\\Activate.ps1
 python -m pip install -r requirements.txt
-$env:DATABASE_URL = "postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require"
 uvicorn app.main:app --reload
 ```
 
