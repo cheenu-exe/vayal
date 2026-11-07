@@ -127,7 +127,7 @@ def init_db():
         );
         """)
         count = db.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
-        if count == 0:
+        if count == 0 and not USE_POSTGRES:
             demo = [
                 ("m1","Demo Owner A","9000000001","Tractor","Tractor + plough","Pollachi","Coimbatore","Demo listing",1500,1,"Illustrative listing; verify before use"),
                 ("m2","Demo Owner B","9000000002","Rotavator","Tractor rotavator","Kinathukadavu","Coimbatore","Demo listing",1800,1,"Illustrative listing; verify before use"),
