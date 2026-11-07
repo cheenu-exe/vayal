@@ -210,8 +210,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
       bookings: previous.bookings.map(booking =>
         booking.id === id &&
         booking.ownerPhone === currentUser.phone &&
-        booking.status === "confirmed" &&
-        booking.farmerPresent
+        booking.status === "confirmed"
           ? { ...booking, operatorArrivalConfirmed: true }
           : booking
       ),
