@@ -1,39 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { makeDemoState } from "@/prototype/seed";
-import { todayInputValue } from "@/prototype/format";
+import { hasRentalConflict, isMachineAvailableForDate } from "@/prototype/bookingRules";
 import type { Booking, BookingStatus, MachineDraft, MachineListing, NewBookingInput, Profile, PrototypeState, Role, VerificationStatus } from "@/prototype/types";
 
 const STORAGE_KEY = "vayal-prototype-state-v1";
-const RENTAL_BLOCKING_STATUSES: BookingStatus[] = ["accepted", "confirmed", "on_site_verified", "completed"];
-
-function isValidDateInput(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
-}
-
-function isMachineAvailableForDate(machine: MachineListing | undefined, date: string) {
-  return Boolean(
-    machine &&
-    machine.enabled &&
-    machine.verificationStatus === "verified" &&
-    isValidDateInput(date) &&
-    date >= todayInputValue() &&
-    date >= machine.availabilityStart &&
-    date <= machine.availabilityEnd &&
-    !machine.unavailableDates.includes(date)
-  );
-}
-
-function hasRentalConflict(bookings: Booking[], machineId: string, date: string, ignoreId?: string) {
-  return bookings.some(booking =>
-    booking.id !== ignoreId &&
-    booking.machineId === machineId &&
-    booking.requestedDate === date &&
-    RENTAL_BLOCKING_STATUSES.includes(booking.status)
-  );
-}
 
 export function normalizePhone(value: string) {
   const digits = value.replace(/\D/g, "");
