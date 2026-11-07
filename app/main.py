@@ -472,6 +472,10 @@ def update_booking(
             require_role(user,"machine_owner")
             if status == "cancelled":
                 raise HTTPException(status_code=403,detail="Machine owners cannot cancel a farmer's booking.")
+            if status in ("accepted","rejected") and booking["status"] != "requested":
+                raise HTTPException(status_code=409,detail="Only pending requests can be accepted or declined.")
+            if status == "completed" and booking["status"] != "accepted":
+                raise HTTPException(status_code=409,detail="Only accepted bookings can be marked completed.")
             chosen = machine_id or booking["machine_id"]
             if status == "accepted":
                 if not chosen:
