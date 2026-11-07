@@ -41,7 +41,7 @@ The application selects PostgreSQL whenever `DATABASE_URL` is set. If it is not 
 
 Vercel detects the FastAPI application through `app/index.py`. No custom build command is required for this project.
 
-The first application startup creates the required tables and adds illustrative sample machine listings if the machines table is empty. Do not treat those sample listings or rates as real offers.
+The first application startup creates the required tables. Illustrative sample machinery listings are seeded only into local SQLite; a new PostgreSQL database starts empty, so production will not display fictional machines, owners, phone numbers or rates.
 
 ## Database behavior
 - `DATABASE_URL` set: PostgreSQL via Psycopg 3.
