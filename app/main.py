@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import os
 import sqlite3
 from contextlib import closing
 from datetime import datetime, date
@@ -15,15 +15,94 @@ from pydantic import BaseModel, Field, model_validator
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "vayal.db"
-app = FastAPI(title="Vayal — AgriMach", version="0.1.0", description="Voice-first agricultural machinery marketplace")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+USE_POSTGRES = bool(DATABASE_URL)
+app = FastAPI(title="Vayal — AgriMach", version="0.1.1", description="Voice-first agricultural machinery marketplace")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
+class HybridRow(dict):
+    """Mapping row that also supports SQLite-style integer indexing."""
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+class CursorResult:
+    def __init__(self, cursor):
+        self.cursor = cursor
+        self.rowcount = cursor.rowcount
+
+    @staticmethod
+    def _row(row):
+        return HybridRow(row) if row is not None else None
+
+    def fetchone(self):
+        return self._row(self.cursor.fetchone())
+
+    def fetchall(self):
+        return [self._row(row) for row in self.cursor.fetchall()]
+
+
+class DatabaseConnection:
+    """Small DB-API adapter so the same parameterized SQL works on SQLite and Postgres."""
+    def __init__(self, connection, postgres=False):
+        self.connection = connection
+        self.postgres = postgres
+
+    def _sql(self, sql):
+        return sql.replace("?", "%s") if self.postgres else sql
+
+    def execute(self, sql, params=()):
+        return CursorResult(self.connection.execute(self._sql(sql), params))
+
+    def executemany(self, sql, params):
+        return self.connection.executemany(self._sql(sql), params)
+
+    def executescript(self, script):
+        if self.postgres:
+            # The schema contains simple DDL statements without procedural blocks.
+            for statement in script.split(";"):
+                if statement.strip():
+                    self.connection.execute(statement)
+        else:
+            self.connection.executescript(script)
+
+    def commit(self):
+        self.connection.commit()
+
+    def close(self):
+        self.connection.close()
+
+
 def connect():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    if USE_POSTGRES:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:
+            raise RuntimeError("PostgreSQL is configured but psycopg is missing. Install requirements.txt.") from exc
+
+        database_url = DATABASE_URL
+        if database_url.startswith("postgres://"):
+            database_url = "postgresql://" + database_url[len("postgres://"):]
+        if database_url.startswith("postgresql+psycopg://"):
+            database_url = "postgresql://" + database_url[len("postgresql+psycopg://"):]
+        connection = psycopg.connect(
+            database_url,
+            row_factory=dict_row,
+            connect_timeout=10,
+        )
+        return DatabaseConnection(connection, postgres=True)
+
+    if os.getenv("VERCEL") == "1":
+        raise RuntimeError("DATABASE_URL must be configured in Vercel environment variables. SQLite is for local development only.")
+
+    connection = sqlite3.connect(DB_PATH)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    return DatabaseConnection(connection)
 
 
 def init_db():
@@ -52,7 +131,10 @@ def init_db():
                 ("m2","Demo Owner B","9000000002","Rotavator","Tractor rotavator","Kinathukadavu","Coimbatore","Demo listing",1800,1,"Illustrative listing; verify before use"),
                 ("m3","Demo Owner C","9000000003","Harvester","Paddy combine harvester","Udumalpet","Tiruppur","Demo listing",2500,1,"Illustrative listing; verify before use")
             ]
-            db.executemany("INSERT INTO machines VALUES (?,?,?,?,?,?,?,?,?,?,?)", demo)
+            db.executemany(
+                "INSERT INTO machines VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+                demo,
+            )
         db.commit()
 
 
