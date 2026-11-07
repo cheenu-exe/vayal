@@ -352,7 +352,8 @@ def sign_out(request: Request, response: Response):
 
 @app.get("/api/machines")
 def list_machines(district: str | None = None, machine_type: str | None = None):
-    query = "SELECT * FROM machines WHERE available=1"
+    query = """SELECT id,machine_type,title,village,district,landmark,rate_per_acre,available,description
+               FROM machines WHERE available=1"""
     args = []
     if district:
         query += " AND lower(district)=lower(?)"
@@ -447,7 +448,12 @@ def list_bookings(status: str | None = None, user: dict = Depends(current_user))
         args.append(status)
     query += " ORDER BY b.created_at DESC LIMIT 200"
     with closing(connect()) as db:
-        return [dict(row) for row in db.execute(query,args).fetchall()]
+        rows = [dict(row) for row in db.execute(query,args).fetchall()]
+    if user["role"] == "machine_owner":
+        for row in rows:
+            if row["status"] != "accepted":
+                row["farmer_phone"] = None
+    return rows
 
 
 @app.patch("/api/bookings/{booking_id}")
