@@ -5,7 +5,7 @@ import { MarketplaceLayout } from "@/components/MarketplaceLayout";
 import { BookingStatusBadge, VerificationBadge } from "@/components/StatusBadge";
 import { DemoNotice, PageHeading } from "@/components/PageHeading";
 import { usePrototype } from "@/contexts/PrototypeContext";
-import { formatDate, formatRupees, todayInputValue } from "@/prototype/format";
+import { formatDate, formatRupees, isDateBlocked, todayInputValue } from "@/prototype/format";
 import { getRentalDates, getRentalEndDate, hasRentalConflict, isMachineAvailableForRental, isValidDateInput } from "@/prototype/bookingRules";
 import type { NewBookingInput } from "@/prototype/types";
 
